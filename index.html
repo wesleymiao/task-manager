@@ -617,7 +617,7 @@ body {
     </div>
     <div class="form-group">
       <label class="form-label">Deadline</label>
-      <input type="date" id="taskDeadline" class="form-input">
+      <input type="datetime-local" id="taskDeadline" class="form-input">
     </div>
     <div class="form-group">
       <label class="form-label">提醒时间（可选）</label>
@@ -702,6 +702,14 @@ function isToday(dateStr) {
 function daysBetween(a, b) {
   const da = new Date(a), db = new Date(b);
   return Math.round((db - da) / 86400000);
+}
+function fmtDeadline(dl) {
+  if (!dl) return '';
+  if (dl.includes('T')) {
+    const [d, t] = dl.split('T');
+    return d.slice(5) + ' ' + t;
+  }
+  return dl.slice(5);
 }
 function showToast(msg) {
   const t = document.createElement('div');
@@ -820,7 +828,7 @@ function renderWeekGrid() {
       if (isDone) cls += ' done';
       else if (isOverdue) cls += ' overdue';
       cls += ` priority-${t.priority || 'medium'}`;
-      const deadlineInfo = t.deadline ? `📅 ${t.deadline.slice(5)}` : '';
+      const deadlineInfo = t.deadline ? `📅 ${fmtDeadline(t.deadline)}` : '';
       const timeInfo = t.estimatedMinutes ? `⏱${t.estimatedMinutes}分钟` : '';
       html += `<div class="${cls}" onclick="openDetail('${t.id}')">
         <div class="task-title">${isDone ? '✅ ' : ''}${t.title}</div>
@@ -866,7 +874,7 @@ function renderToday() {
 function renderTaskListItem(t, showDate = false) {
   const isDone = t.status === 'done';
   const extra = showDate ? ` · 计划于${t.plannedDate.slice(5)}` : '';
-  const deadlineStr = t.deadline ? ` · 截止${t.deadline.slice(5)}` : '';
+  const deadlineStr = t.deadline ? ` · 截止${fmtDeadline(t.deadline)}` : '';
   return `<div class="task-list-item" onclick="openDetail('${t.id}')">
     <div class="task-check ${isDone ? 'checked' : ''}" onclick="event.stopPropagation();toggleTask('${t.id}')">
       ${isDone ? '✓' : ''}
@@ -1126,7 +1134,7 @@ function openDetail(id) {
   if (t.deadline) {
     const daysLeft = daysBetween(today, t.deadline);
     const dlColor = daysLeft < 0 ? 'var(--danger)' : daysLeft <= 1 ? 'var(--warning)' : 'var(--text)';
-    html += `🎯 Deadline：<span style="color:${dlColor};font-weight:600">${t.deadline}</span>`;
+    html += `🎯 Deadline：<span style="color:${dlColor};font-weight:600">${fmtDeadline(t.deadline)}</span>`;
     if (!isDone) html += ` (${daysLeft < 0 ? '已逾期'+Math.abs(daysLeft)+'天' : '还剩'+daysLeft+'天'})`;
     html += `<br>`;
   }
