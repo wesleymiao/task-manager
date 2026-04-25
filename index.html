@@ -161,6 +161,9 @@ body {
 .task-card.done { opacity: 0.65; border-left-color: var(--success); }
 .task-card.done .task-title { text-decoration: line-through; }
 .task-card.overdue { border-left-color: var(--danger); background: #FEF2F2; }
+.task-card.event { border-left-color: #8B5CF6; background: #F5F3FF; }
+.task-card.event .task-title { color: #6D28D9; }
+.event-time { font-size: 12px; color: #7C3AED; font-weight: 600; margin-bottom: 2px; }
 .task-title {
   font-size: 13px;
   font-weight: 600;
@@ -586,7 +589,14 @@ body {
   <div class="modal">
     <h3 id="modalTitle">➕ 新建任务</h3>
     <div class="form-group">
-      <label class="form-label">任务名称</label>
+      <label class="form-label">类型</label>
+      <div class="chip-group" id="typeChips">
+        <div class="chip selected" onclick="pickType(this,'task')">📋 任务</div>
+        <div class="chip" onclick="pickType(this,'event')">📅 预约/会议</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label" id="titleLabel">任务名称</label>
       <input type="text" id="taskTitle" class="form-input" placeholder="需要完成什么？">
     </div>
     <div class="form-group">
@@ -611,11 +621,19 @@ body {
       <label class="form-label">计划完成日期</label>
       <input type="date" id="taskPlannedDate" class="form-input">
     </div>
-    <div class="form-group">
+    <div class="form-group event-fields" style="display:none">
+      <label class="form-label">开始时间</label>
+      <input type="time" id="eventStartTime" class="form-input">
+    </div>
+    <div class="form-group event-fields" style="display:none">
+      <label class="form-label">结束时间</label>
+      <input type="time" id="eventEndTime" class="form-input">
+    </div>
+    <div class="form-group task-fields">
       <label class="form-label">预计耗时（分钟）</label>
       <input type="number" id="taskEstimate" class="form-input" placeholder="60" min="1">
     </div>
-    <div class="form-group">
+    <div class="form-group task-fields">
       <label class="form-label">Deadline</label>
       <input type="datetime-local" id="taskDeadline" class="form-input">
     </div>
@@ -623,7 +641,7 @@ body {
       <label class="form-label">提醒时间（可选）</label>
       <input type="datetime-local" id="taskReminder" class="form-input">
     </div>
-    <div class="form-group">
+    <div class="form-group task-fields">
       <label class="form-label">完成奖励</label>
       <select id="taskReward" class="form-input">
         <option value="">无奖励</option>
@@ -671,6 +689,7 @@ let editingTaskId = null;
 let detailTaskId = null;
 let selectedCat = 'work';
 let selectedPriority = 'medium';
+let selectedType = 'task';
 let _syncing = false;
 
 // ==================== DEFAULTS ====================
@@ -772,9 +791,11 @@ function renderWeekLabel() {
     formatDate(currentWeekStart).slice(5) + ' ~ ' + formatDate(end).slice(5);
 
   const tasks = getWeekTasks();
-  const done = tasks.filter(t => t.status === 'done').length;
+  const taskOnly = tasks.filter(t => t.type !== 'event');
+  const events = tasks.filter(t => t.type === 'event');
+  const done = taskOnly.filter(t => t.status === 'done').length;
   document.getElementById('headerSub').textContent =
-    tasks.length === 0 ? '暂无任务，点击 + 添加' : `共 ${tasks.length} 项任务，已完成 ${done} 项`;
+    tasks.length === 0 ? '暂无任务，点击 + 添加' : `${taskOnly.length} 项任务（完成 ${done}）${events.length ? `，${events.length} 项预约` : ''}`;
 }
 
 function getWeekTasks() {
@@ -817,21 +838,31 @@ function renderWeekGrid() {
       html += `<div style="text-align:center;padding:12px;font-size:11px;color:var(--text-secondary)">无任务</div>`;
     }
     dayTasks.sort((a,b) => {
+      // Events with startTime first, sorted by time
+      const aIsEvent = a.type === 'event' && a.startTime;
+      const bIsEvent = b.type === 'event' && b.startTime;
+      if (aIsEvent && !bIsEvent) return -1;
+      if (!aIsEvent && bIsEvent) return 1;
+      if (aIsEvent && bIsEvent) return (a.startTime||'').localeCompare(b.startTime||'');
       const po = {high:0,medium:1,low:2};
       if (a.status !== b.status) return a.status === 'done' ? 1 : -1;
       return (po[a.priority]||1) - (po[b.priority]||1);
     });
     dayTasks.forEach(t => {
       const isDone = t.status === 'done';
-      const isOverdue = !isDone && t.deadline && t.deadline < today;
+      const isEvent = t.type === 'event';
+      const isOverdue = !isDone && !isEvent && t.deadline && t.deadline < today;
       let cls = 'task-card';
-      if (isDone) cls += ' done';
+      if (isEvent) cls += ' event';
+      else if (isDone) cls += ' done';
       else if (isOverdue) cls += ' overdue';
-      cls += ` priority-${t.priority || 'medium'}`;
-      const deadlineInfo = t.deadline ? `📅 ${fmtDeadline(t.deadline)}` : '';
-      const timeInfo = t.estimatedMinutes ? `⏱${t.estimatedMinutes}分钟` : '';
+      if (!isEvent) cls += ` priority-${t.priority || 'medium'}`;
+      const deadlineInfo = !isEvent && t.deadline ? `📅 ${fmtDeadline(t.deadline)}` : '';
+      const timeInfo = !isEvent && t.estimatedMinutes ? `⏱${t.estimatedMinutes}分钟` : '';
+      const eventTimeStr = isEvent && t.startTime ? (t.endTime ? `${t.startTime}-${t.endTime}` : t.startTime) : '';
       html += `<div class="${cls}" onclick="openDetail('${t.id}')">
-        <div class="task-title">${isDone ? '✅ ' : ''}${t.title}</div>
+        ${eventTimeStr ? `<div class="event-time">🕐 ${eventTimeStr}</div>` : ''}
+        <div class="task-title">${isDone ? '✅ ' : isEvent ? '📅 ' : ''}${t.title}</div>
         <div class="task-meta">
           <span class="task-tag ${CAT_TAG_CLASS[t.category] || 'tag-other'}">${CAT_LABELS[t.category] || t.category}</span>
           ${timeInfo ? `<span>${timeInfo}</span>` : ''}
@@ -859,8 +890,13 @@ function renderWeekGrid() {
 function renderToday() {
   const tasks = getTasks();
   const today = formatDate(new Date());
-  const todayTasks = tasks.filter(t => t.plannedDate === today);
-  const overdueTasks = tasks.filter(t => t.status !== 'done' && t.plannedDate < today && t.plannedDate >= formatDate(new Date(Date.now() - 30*86400000)));
+  const todayTasks = tasks.filter(t => t.plannedDate === today).sort((a,b) => {
+    if (a.type === 'event' && b.type !== 'event') return -1;
+    if (a.type !== 'event' && b.type === 'event') return 1;
+    if (a.type === 'event' && b.type === 'event') return (a.startTime||'').localeCompare(b.startTime||'');
+    return 0;
+  });
+  const overdueTasks = tasks.filter(t => t.status !== 'done' && t.type !== 'event' && t.plannedDate < today && t.plannedDate >= formatDate(new Date(Date.now() - 30*86400000)));
 
   document.getElementById('todayList').innerHTML = todayTasks.length === 0
     ? '<div class="empty">今天没有任务 🎉</div>'
@@ -873,17 +909,19 @@ function renderToday() {
 
 function renderTaskListItem(t, showDate = false) {
   const isDone = t.status === 'done';
+  const isEvent = t.type === 'event';
   const extra = showDate ? ` · 计划于${t.plannedDate.slice(5)}` : '';
-  const deadlineStr = t.deadline ? ` · 截止${fmtDeadline(t.deadline)}` : '';
-  return `<div class="task-list-item" onclick="openDetail('${t.id}')">
-    <div class="task-check ${isDone ? 'checked' : ''}" onclick="event.stopPropagation();toggleTask('${t.id}')">
+  const deadlineStr = !isEvent && t.deadline ? ` · 截止${fmtDeadline(t.deadline)}` : '';
+  const eventTimeStr = isEvent && t.startTime ? (t.endTime ? `🕐 ${t.startTime}-${t.endTime}` : `🕐 ${t.startTime}`) : '';
+  return `<div class="task-list-item" onclick="openDetail('${t.id}')" ${isEvent ? 'style="background:#F5F3FF"' : ''}>
+    <div class="task-check ${isDone ? 'checked' : ''}" onclick="event.stopPropagation();toggleTask('${t.id}')"${isEvent ? ' style="border-color:#8B5CF6"' : ''}>
       ${isDone ? '✓' : ''}
     </div>
     <div class="task-list-info">
-      <div class="task-list-title ${isDone ? 'done-text' : ''}">${t.title}</div>
+      <div class="task-list-title ${isDone ? 'done-text' : ''}" ${isEvent ? 'style="color:#6D28D9"' : ''}>${isEvent ? '📅 ' : ''}${t.title}</div>
       <div class="task-list-sub">
         <span class="task-tag ${CAT_TAG_CLASS[t.category] || 'tag-other'}">${CAT_LABELS[t.category] || t.category}</span>
-        ${t.estimatedMinutes ? `⏱${t.estimatedMinutes}分钟` : ''}${deadlineStr}${extra}
+        ${eventTimeStr}${!isEvent && t.estimatedMinutes ? `⏱${t.estimatedMinutes}分钟` : ''}${deadlineStr}${extra}
       </div>
     </div>
   </div>`;
@@ -977,18 +1015,22 @@ function renderSettings() {
 // ==================== TASK ACTIONS ====================
 function openAddModal() {
   editingTaskId = null;
-  document.getElementById('modalTitle').textContent = '➕ 新建任务';
+  document.getElementById('modalTitle').textContent = '➕ 新建';
   document.getElementById('taskTitle').value = '';
   document.getElementById('taskPlannedDate').value = formatDate(new Date());
   document.getElementById('taskEstimate').value = '';
   document.getElementById('taskDeadline').value = '';
   document.getElementById('taskReminder').value = '';
   document.getElementById('taskReward').value = '';
+  document.getElementById('eventStartTime').value = '';
+  document.getElementById('eventEndTime').value = '';
   document.getElementById('deleteTaskBtn').style.display = 'none';
   selectedCat = 'work';
   selectedPriority = 'medium';
+  selectedType = 'task';
   resetChips();
-  renderSettings(); // refresh reward list
+  pickType(document.querySelector('#typeChips .chip'), 'task');
+  renderSettings();
   document.getElementById('taskModal').classList.add('show');
 }
 
@@ -997,17 +1039,22 @@ function openEditModal(id) {
   const t = tasks.find(x => x.id === id);
   if (!t) return;
   editingTaskId = id;
-  document.getElementById('modalTitle').textContent = '✏️ 编辑任务';
+  document.getElementById('modalTitle').textContent = '✏️ 编辑';
   document.getElementById('taskTitle').value = t.title;
   document.getElementById('taskPlannedDate').value = t.plannedDate || '';
   document.getElementById('taskEstimate').value = t.estimatedMinutes || '';
   document.getElementById('taskDeadline').value = t.deadline || '';
   document.getElementById('taskReminder').value = t.reminderTime || '';
   document.getElementById('taskReward').value = t.reward || '';
+  document.getElementById('eventStartTime').value = t.startTime || '';
+  document.getElementById('eventEndTime').value = t.endTime || '';
   document.getElementById('deleteTaskBtn').style.display = 'block';
   selectedCat = t.category || 'work';
   selectedPriority = t.priority || 'medium';
+  selectedType = t.type || 'task';
   resetChips();
+  const typeIdx = selectedType === 'event' ? 1 : 0;
+  pickType(document.querySelectorAll('#typeChips .chip')[typeIdx], selectedType);
   renderSettings();
   document.getElementById('taskModal').classList.add('show');
 }
@@ -1025,6 +1072,16 @@ function resetChips() {
   });
 }
 
+function pickType(el, type) {
+  selectedType = type;
+  el.parentElement.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  const isEvent = type === 'event';
+  document.querySelectorAll('.task-fields').forEach(e => e.style.display = isEvent ? 'none' : '');
+  document.querySelectorAll('.event-fields').forEach(e => e.style.display = isEvent ? '' : 'none');
+  document.getElementById('titleLabel').textContent = isEvent ? '事项名称' : '任务名称';
+  document.getElementById('taskTitle').placeholder = isEvent ? '例如：周会、客户会议、看牙...' : '需要完成什么？';
+}
 function pickCat(el, cat) {
   selectedCat = cat;
   el.parentElement.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
@@ -1042,31 +1099,38 @@ function saveTask() {
   const plannedDate = document.getElementById('taskPlannedDate').value;
   if (!plannedDate) { showToast('请选择计划日期'); return; }
 
+  const isEvent = selectedType === 'event';
   const tasks = getTasks();
   if (editingTaskId) {
     const idx = tasks.findIndex(t => t.id === editingTaskId);
     if (idx >= 0) {
       tasks[idx].title = title;
+      tasks[idx].type = selectedType;
       tasks[idx].category = selectedCat;
       tasks[idx].priority = selectedPriority;
       tasks[idx].plannedDate = plannedDate;
-      tasks[idx].estimatedMinutes = parseInt(document.getElementById('taskEstimate').value) || 0;
-      tasks[idx].deadline = document.getElementById('taskDeadline').value || null;
+      tasks[idx].estimatedMinutes = isEvent ? 0 : (parseInt(document.getElementById('taskEstimate').value) || 0);
+      tasks[idx].deadline = isEvent ? null : (document.getElementById('taskDeadline').value || null);
       tasks[idx].reminderTime = document.getElementById('taskReminder').value || null;
-      tasks[idx].reward = document.getElementById('taskReward').value || null;
+      tasks[idx].reward = isEvent ? null : (document.getElementById('taskReward').value || null);
+      tasks[idx].startTime = isEvent ? (document.getElementById('eventStartTime').value || null) : null;
+      tasks[idx].endTime = isEvent ? (document.getElementById('eventEndTime').value || null) : null;
       tasks[idx].updatedAt = new Date().toISOString();
     }
   } else {
     tasks.push({
       id: 't_' + Date.now(),
       title,
+      type: selectedType,
       category: selectedCat,
       priority: selectedPriority,
       plannedDate,
-      estimatedMinutes: parseInt(document.getElementById('taskEstimate').value) || 0,
-      deadline: document.getElementById('taskDeadline').value || null,
+      estimatedMinutes: isEvent ? 0 : (parseInt(document.getElementById('taskEstimate').value) || 0),
+      deadline: isEvent ? null : (document.getElementById('taskDeadline').value || null),
       reminderTime: document.getElementById('taskReminder').value || null,
-      reward: document.getElementById('taskReward').value || null,
+      reward: isEvent ? null : (document.getElementById('taskReward').value || null),
+      startTime: isEvent ? (document.getElementById('eventStartTime').value || null) : null,
+      endTime: isEvent ? (document.getElementById('eventEndTime').value || null) : null,
       status: 'pending',
       completedAt: null,
       createdAt: new Date().toISOString(),
@@ -1118,20 +1182,25 @@ function openDetail(id) {
   detailTaskId = id;
   const today = formatDate(new Date());
   const isDone = t.status === 'done';
-  const isOverdue = !isDone && t.deadline && t.deadline < today;
+  const isEvent = t.type === 'event';
+  const isOverdue = !isDone && !isEvent && t.deadline && t.deadline < today;
 
-  document.getElementById('detailTitle').textContent = (isDone ? '✅ ' : isOverdue ? '⚠️ ' : '') + t.title;
-  document.getElementById('detailCompleteBtn').textContent = isDone ? '↩️ 标记未完成' : '✅ 标记完成';
+  document.getElementById('detailTitle').textContent = (isDone ? '✅ ' : isEvent ? '📅 ' : isOverdue ? '⚠️ ' : '') + t.title;
+  document.getElementById('detailCompleteBtn').textContent = isDone ? '↩️ 标记未完成' : isEvent ? '✅ 标记已参加' : '✅ 标记完成';
   document.getElementById('detailCompleteBtn').className = isDone ? 'btn btn-secondary' : 'btn btn-primary';
 
   let html = `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">
     <span class="task-tag ${CAT_TAG_CLASS[t.category]||'tag-other'}">${CAT_LABELS[t.category]||t.category}</span>
-    <span class="task-tag" style="background:#F3F4F6">${PRIORITY_LABELS[t.priority]||'🟡 中'}</span>
+    ${isEvent ? '<span class="task-tag" style="background:#EDE9FE;color:#6D28D9">📅 预约/会议</span>' : `<span class="task-tag" style="background:#F3F4F6">${PRIORITY_LABELS[t.priority]||'🟡 中'}</span>`}
   </div>`;
   html += `<div style="font-size:14px;line-height:2">`;
-  html += `📅 计划日期：${t.plannedDate}<br>`;
-  if (t.estimatedMinutes) html += `⏱ 预计耗时：${t.estimatedMinutes} 分钟<br>`;
-  if (t.deadline) {
+  html += `📅 日期：${t.plannedDate}<br>`;
+  if (isEvent) {
+    if (t.startTime) html += `🕐 开始时间：${t.startTime}<br>`;
+    if (t.endTime) html += `🕑 结束时间：${t.endTime}<br>`;
+  } else {
+    if (t.estimatedMinutes) html += `⏱ 预计耗时：${t.estimatedMinutes} 分钟<br>`;
+    if (t.deadline) {
     const daysLeft = daysBetween(today, t.deadline);
     const dlColor = daysLeft < 0 ? 'var(--danger)' : daysLeft <= 1 ? 'var(--warning)' : 'var(--text)';
     html += `🎯 Deadline：<span style="color:${dlColor};font-weight:600">${fmtDeadline(t.deadline)}</span>`;
@@ -1139,6 +1208,7 @@ function openDetail(id) {
     html += `<br>`;
   }
   if (t.reward) html += `🎁 奖励：${t.reward}<br>`;
+  }
   if (t.reminderTime) html += `⏰ 提醒：${t.reminderTime.replace('T',' ')}<br>`;
   if (t.completedAt) html += `✅ 完成于：${t.completedAt.slice(0,16).replace('T',' ')}<br>`;
   html += `📝 创建于：${t.createdAt.slice(0,16).replace('T',' ')}`;
